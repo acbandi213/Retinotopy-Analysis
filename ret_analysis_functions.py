@@ -10,6 +10,7 @@ from PIL import Image
 from torchvision.transforms import ToTensor
 import os
 import math
+import h5py
 
 
 class retinotopy_analysis:
@@ -30,6 +31,33 @@ class retinotopy_analysis:
         path_elevation_UD = path + 'Frames_1_640_540_uint16_000{}.dat'.format(file_num + 2)
         path_elevation_DU = path + 'Frames_1_640_540_uint16_000{}.dat'.format(file_num + 3)
         return path_azimuth_LR, path_azimuth_RL, path_elevation_UD, path_elevation_DU
+    
+    def get_stim_times(path, align_file_name, file_num):
+        # Load the uploaded .hf file
+        file_path = path + align_file_name + '{}.h5'.format(file_num)
+        # Open the file
+        with h5py.File(file_path, 'r') as file:
+            # List all groups
+            print("Keys: %s" % file.keys())
+            keys_list = list(file.keys())
+            key = keys_list[1]
+            stimulus = file[key]['analogScans'][()][0]/30000
+            imaging = file[key]['digitalScans'][()][0]
+            time_imaged = np.where(imaging > 0)[0]
+            time_stimulus = np.where(stimulus > 0)[0]
+            length_of_imaging = time_imaged[-1] - time_imaged[0]
+            conv = 320000/905
+            start_of_stim = (time_stimulus[0]-time_imaged[0])/conv
+            if file_num < 3:
+                end_of_stim = start_of_stim + 20*30
+            elif file_num > 2:
+                end_of_stim = start_of_stim + 18*30 
+
+        return int(start_of_stim), int(end_of_stim)
+    
+    def extract_aligned_tensor(path, align_file_name, tensor, file_num):
+        start, stop = retinotopy_analysis.get_stim_times(path, align_file_name, file_num)
+        return tensor[start:stop, :, :]
 
     def _parse_binary_fname(fname,lastidx=None, dtype = 'uint16', shape = None, sep = '_'):
         '''
@@ -132,9 +160,14 @@ class retinotopy_analysis:
         return tensor_470
 
     def corrected_az_elev(tensor_azimuthLR, tensor_azimuthRL, tensor_elevationUD, tensor_elevationDU):
-        tensor_azimuth = (tensor_azimuthLR - tensor_azimuthRL)
-        tensor_elevation = (tensor_elevationUD - tensor_elevationDU)
+        #size = min(tensor_azimuthLR.shape[0], tensor_azimuthRL.shape[0])
+        size = 20*30
+        tensor_azimuth = (tensor_azimuthLR[0:size] - tensor_azimuthRL[0:size])
+        #size2 = min(tensor_elevationUD.shape[0], tensor_elevationDU.shape[0])
+        size2 = 18*30
+        tensor_elevation = (tensor_elevationUD[0:size2] - tensor_elevationDU[0:size2])
         return tensor_azimuth, tensor_elevation
+
     
     def create_stimulus_corrected_movie_pt(tensor, baseline_start, baseline_end):
         '''
